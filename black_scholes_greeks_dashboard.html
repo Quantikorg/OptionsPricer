@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interactive Black-Scholes Option Pricer with All Highlighted Greeks</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f4;
+        color: #333;
+        padding: 20px;
+    }
+    .container {
+        max-width: 900px;
+        margin: auto;
+        background: #fff;
+        padding: 20px 30px;
+        border-radius: 10px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+    .form-group {
+        margin-bottom: 15px;
+    }
+    .form-group label {
+        font-weight: bold;
+        display: block;
+        margin-bottom: 5px;
+    }
+    input[type=number], select {
+        padding: 8px;
+        width: 100%;
+        border-radius: 5px;
+        border: 1px solid #ccc;
+        font-size: 1rem;
+        box-sizing: border-box;
+    }
+    select {
+        background-color: #fff8c4; /* specified yellow */
+        font-size: 1.1rem;
+    }
+    input[type=range] {
+        width: 100%;
+        margin-bottom: 5px;
+        accent-color: grey; /* grey sliders */
+    }
+    .result {
+        margin-top: 10px;
+        font-weight: bold;
+    }
+    canvas {
+        margin-top: 20px;
+    }
+    .button-container {
+        margin-top: 15px;
+        text-align: right;
+    }
+    button {
+        padding: 10px 20px;
+        font-size: 1rem;
+        border: none;
+        border-radius: 5px;
+        background-color: grey;
+        color: white;
+        cursor: pointer;
+    }
+    button:hover {
+        background-color: darkgrey;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <h2>Interactive Black-Scholes Option Pricer with Highlighted Greeks</h2>
+
+    <div class="form-group">
+        <label>Option Type:</label>
+        <select id="type">
+            <option value="call">Call</option>
+            <option value="put">Put</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>Strike Price (K):</label>
+        <input type="number" id="K" value="100">
+    </div>
+
+    <div class="form-group">
+        <label>Risk-free Rate (r): <span id="r_val">0.05</span></label>
+        <input type="range" id="r" min="-0.05" max="0.10" step="0.001" value="0.05">
+    </div>
+
+    <div class="form-group">
+        <label>Stock Price (S): <span id="S_val">100</span></label>
+        <input type="range" id="S" min="50" max="150" value="100">
+    </div>
+
+    <div class="form-group">
+        <label>Volatility (σ): <span id="sigma_val">0.2</span></label>
+        <input type="range" id="sigma" min="0.05" max="1" step="0.01" value="0.2">
+    </div>
+
+    <div class="form-group">
+        <label>Time to Maturity (Years, T): <span id="T_val">1</span></label>
+        <input type="range" id="T" min="0.01" max="3" step="0.01" value="1">
+    </div>
+
+    <div class="button-container">
+        <button id="resetBtn">Reset</button>
+    </div>
+
+    <div class="result" id="result"></div>
+    <canvas id="greeksChart"></canvas>
+</div>
+
+<script>
+function erf(x) {
+    var sign = (x >= 0) ? 1 : -1;
+    x = Math.abs(x);
+    var a = 0.254829592, b = -0.284496736, c = 1.421413741, d = -1.453152027, e = 1.061405429;
+    var t = 1.0 / (1.0 + 0.3275911 * x);
+    var y = 1.0 - (((((e * t + d) * t + c) * t + b) * t + a) * t) * Math.exp(-x * x);
+    return sign * y;
+}
+
+function normCDF(x) {
+    return (1.0 + erf(x / Math.sqrt(2))) / 2.0;
+}
+
+function blackScholesGreeks(S, K, T, r, sigma, type) {
+    const d1 = (Math.log(S/K) + (r + 0.5*sigma*sigma)*T) / (sigma * Math.sqrt(T));
+    const d2 = d1 - sigma * Math.sqrt(T);
+    const Nd1 = normCDF(d1);
+    const Nd2 = normCDF(d2);
+    const Nmd1 = normCDF(-d1);
+    const Nmd2 = normCDF(-d2);
+    const pdf = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI);
+
+    let price, delta, gamma, theta, vega, rho;
+
+    if(type === 'call') {
+        price = S*Nd1 - K*Math.exp(-r*T)*Nd2;
+        delta = Nd1;
+        theta = ((-S*pdf*sigma)/(2*Math.sqrt(T))) - r*K*Math.exp(-r*T)*Nd2;
+        rho = (K*T*Math.exp(-r*T)*Nd2) / 100; // per 1% change
+    } else {
+        price = K*Math.exp(-r*T)*Nmd2 - S*Nmd1;
+        delta = Nd1 - 1;
+        theta = ((-S*pdf*sigma)/(2*Math.sqrt(T))) + r*K*Math.exp(-r*T)*Nmd2;
+        rho = (-K*T*Math.exp(-r*T)*Nmd2) / 100; // per 1% change
+    }
+
+    gamma = pdf / (S*sigma*Math.sqrt(T));
+    vega = (S * pdf * Math.sqrt(T)) / 100; // per 1% change
+    theta = theta / 365; // per day
+
+    return {price, delta, gamma, theta, vega, rho};
+}
+
+let chart;
+
+function updateStockSlicer() {
+    const K = parseFloat(document.getElementById('K').value);
+    const S_input = document.getElementById('S');
+    S_input.min = (K * 0.5).toFixed(2);
+    S_input.max = (K * 1.5).toFixed(2);
+    S_input.value = K.toFixed(2);
+    document.getElementById('S_val').innerText = S_input.value;
+}
+
+function updateChart() {
+    const S = parseFloat(document.getElementById('S').value);
+    const K = parseFloat(document.getElementById('K').value);
+    const T = parseFloat(document.getElementById('T').value);
+    const r = parseFloat(document.getElementById('r').value);
+    const sigma = parseFloat(document.getElementById('sigma').value);
+    const type = document.getElementById('type').value;
+
+    document.getElementById('S_val').innerText = S.toFixed(2);
+    document.getElementById('T_val').innerText = T.toFixed(2);
+    document.getElementById('sigma_val').innerText = sigma.toFixed(2);
+    document.getElementById('r_val').innerText = r.toFixed(3);
+
+    const greeks = blackScholesGreeks(S, K, T, r, sigma, type);
+    document.getElementById('result').innerText = `${type.charAt(0).toUpperCase()+type.slice(1)} Price: $${greeks.price.toFixed(2)}\nDelta: ${greeks.delta.toFixed(4)}, Gamma: ${greeks.gamma.toFixed(4)}, Theta (per day): ${greeks.theta.toFixed(4)}, Vega (per 1%): ${greeks.vega.toFixed(4)}, Rho (per 1%): ${greeks.rho.toFixed(4)}`;
+
+    const prices = [], deltas = [], gammas = [], thetas = [], vegas = [], rhos = [];
+    for(let s = parseFloat(document.getElementById('S').min); s <= parseFloat(document.getElementById('S').max); s+=1) {
+        const g = blackScholesGreeks(s, K, T, r, sigma, type);
+        prices.push(s);
+        deltas.push(g.delta);
+        gammas.push(g.gamma);
+        thetas.push(g.theta);
+        vegas.push(g.vega);
+        rhos.push(g.rho);
+    }
+
+    let idx = prices.findIndex(p => p >= S);
+
+    const data = {
+        labels: prices,
+        datasets: [
+            {label:'Delta', data:deltas, borderColor:'blue', fill:false, tension:0.2},
+            {label:'Gamma', data:gammas, borderColor:'green', fill:false, tension:0.2},
+            {label:'Theta', data:thetas, borderColor:'orange', fill:false, tension:0.2},
+            {label:'Vega', data:vegas, borderColor:'purple', fill:false, tension:0.2},
+            {label:'Rho', data:rhos, borderColor:'red', fill:false, tension:0.2},
+            {label:'Delta Current', data:deltas.map((v,i)=>i===idx?v:null), borderColor:'blue', pointRadius:6, type:'scatter', showLine:false},
+            {label:'Gamma Current', data:gammas.map((v,i)=>i===idx?v:null), borderColor:'green', pointRadius:6, type:'scatter', showLine:false},
+            {label:'Theta Current', data:thetas.map((v,i)=>i===idx?v:null), borderColor:'orange', pointRadius:6, type:'scatter', showLine:false},
+            {label:'Vega Current', data:vegas.map((v,i)=>i===idx?v:null), borderColor:'purple', pointRadius:6, type:'scatter', showLine:false},
+            {label:'Rho Current', data:rhos.map((v,i)=>i===idx?v:null), borderColor:'red', pointRadius:6, type:'scatter', showLine:false}
+        ]
+    };
+
+    const config = { type:'line', data:data, options:{ responsive:true, plugins:{legend:{position:'top'}}, scales:{x:{title:{display:true,text:'Stock Price'}},y:{title:{display:true,text:'Value'}}} } };
+
+    if(chart) chart.destroy();
+    chart = new Chart(document.getElementById('greeksChart'), config);
+}
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+    document.getElementById('K').value = 100;
+    document.getElementById('r').value = 0.05;
+    document.getElementById('sigma').value = 0.2;
+    document.getElementById('T').value = 1;
+    document.getElementById('type').value = 'call';
+    updateStockSlicer();
+    updateChart();
+});
+
+['K'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+        updateStockSlicer();
+        updateChart();
+    });
+});
+
+['S','T','sigma','type','r'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateChart);
+    document.getElementById(id).addEventListener('change', updateChart);
+});
+
+updateStockSlicer();
+updateChart();
+</script>
+</body>
+</html>
